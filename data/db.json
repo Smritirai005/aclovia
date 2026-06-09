@@ -1,0 +1,147 @@
+{
+  "student-001": {
+    "studentId": "student-001",
+    "coins": 50,
+    "streak": 1,
+    "subjects": [
+      {
+        "id": "sub-math",
+        "title": "Mathematics",
+        "chapters": [
+          {
+            "id": "ch-algebra",
+            "title": "Algebra",
+            "tasks": [
+              {
+                "id": "task-1",
+                "title": "Linear equations",
+                "status": "not_started",
+                "lamport": 29,
+                "updatedAt": 1781036624881
+              },
+              {
+                "id": "task-2",
+                "title": "Quadratic formula",
+                "status": "not_started",
+                "lamport": 35,
+                "updatedAt": 1781036627057
+              },
+              {
+                "id": "task-3",
+                "title": "Systems of equations",
+                "status": "in_progress",
+                "lamport": 8,
+                "updatedAt": 1781035535691
+              }
+            ]
+          },
+          {
+            "id": "ch-geometry",
+            "title": "Geometry",
+            "tasks": [
+              {
+                "id": "task-4",
+                "title": "Area formulas",
+                "status": "done",
+                "lamport": 38,
+                "updatedAt": 1781037629508
+              },
+              {
+                "id": "task-5",
+                "title": "Pythagorean theorem",
+                "status": "done",
+                "lamport": 39,
+                "updatedAt": 1781037629508
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "sub-science",
+        "title": "Science",
+        "chapters": [
+          {
+            "id": "ch-physics",
+            "title": "Physics",
+            "tasks": [
+              {
+                "id": "task-6",
+                "title": "Newton's laws",
+                "status": "in_progress",
+                "lamport": 17,
+                "updatedAt": 1781035540248
+              },
+              {
+                "id": "task-7",
+                "title": "Energy conservation",
+                "status": "in_progress",
+                "lamport": 20,
+                "updatedAt": 1781035541176
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "sessions": [
+      {
+        "id": "4adf1649-56a0-4409-bdda-225dd93ec2fa",
+        "studentId": "student-001",
+        "targetMinutes": 15,
+        "startedAt": 1781035434130,
+        "coinsEarned": 0,
+        "synced": true,
+        "rewardApplied": false,
+        "endedAt": 1781035451049,
+        "result": "abandoned_app_switch"
+      },
+      {
+        "id": "17124102-4491-4315-8401-8ebaca813ea9",
+        "studentId": "student-001",
+        "targetMinutes": 15,
+        "startedAt": 1781035547670,
+        "coinsEarned": 50,
+        "synced": true,
+        "rewardApplied": false,
+        "endedAt": 1781036447681,
+        "result": "success"
+      },
+      {
+        "id": "eae3d287-d5cb-4c46-8612-13c6eaa033d5",
+        "studentId": "student-001",
+        "targetMinutes": 25,
+        "startedAt": 1781036556531,
+        "coinsEarned": 0,
+        "synced": true,
+        "rewardApplied": false,
+        "endedAt": 1781036559272,
+        "result": "abandoned_give_up"
+      },
+      {
+        "id": "4f52446b-f822-454d-a8bd-46c4740ce385",
+        "studentId": "student-001",
+        "targetMinutes": 15,
+        "startedAt": 1781036587246,
+        "coinsEarned": 0,
+        "synced": true,
+        "rewardApplied": false,
+        "endedAt": 1781036597734,
+        "result": "abandoned_give_up"
+      },
+      {
+        "id": "3bdec68d-828d-4785-9eeb-d206d85a76ea",
+        "studentId": "student-001",
+        "targetMinutes": 15,
+        "startedAt": 1781037295373,
+        "coinsEarned": 0,
+        "synced": true,
+        "rewardApplied": false,
+        "endedAt": 1781037438049,
+        "result": "abandoned_app_switch"
+      }
+    ],
+    "lamportClock": 40,
+    "lastFocusDate": "2026-06-09"
+  }
+}
