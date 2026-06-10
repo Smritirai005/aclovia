@@ -1,13 +1,11 @@
-// Shared between client and server
-
 export type TaskStatus = 'not_started' | 'in_progress' | 'done';
 
 export interface Task {
   id: string;
   title: string;
   status: TaskStatus;
-  lamport: number;       // logical clock — NOT wall time
-  updatedAt: number;     // unix ms, informational only
+  lamport: number;
+  updatedAt: number;
 }
 
 export interface Chapter {
@@ -22,35 +20,37 @@ export interface Subject {
   chapters: Chapter[];
 }
 
-export type SessionResult = 'success' | 'abandoned_give_up' | 'abandoned_app_switch';
+export type SessionResult =
+  | 'success'
+  | 'abandoned_give_up'
+  | 'abandoned_app_switch';
 
 export interface FocusSession {
-  id: string;           // stable UUID — idempotency key everywhere
+  id: string;
   studentId: string;
   targetMinutes: number;
-  startedAt: number;    // unix ms
+  startedAt: number;
   endedAt?: number;
   result?: SessionResult;
   coinsEarned: number;
-  streakDay?: number;   // what day streak was at when this fired
-  synced: boolean;      // has server confirmed this?
-  rewardApplied: boolean; // server: have we applied coins/streak for this?
+  streakDay?: number;
+  synced: boolean;
+  rewardApplied: boolean;
 }
 
 export interface StudentState {
   studentId: string;
   coins: number;
-  streak: number;        // current focus streak in days
-  lastFocusDate?: string; // YYYY-MM-DD
+  streak: number;
+  lastFocusDate?: string; // YYYY-MM-DD — idempotency key for streak
   subjects: Subject[];
   sessions: FocusSession[];
-  lamportClock: number;  // server's clock for this student
+  lamportClock: number;
 }
 
-// What a client sends during sync
 export interface SyncPayload {
   studentId: string;
-  clientId: string;      // which device (tab A or tab B)
+  clientId: string;
   pendingSessions: FocusSession[];
   pendingTaskUpdates: TaskUpdate[];
   lastKnownLamport: number;
@@ -63,8 +63,8 @@ export interface TaskUpdate {
   clientId: string;
 }
 
-// What server sends back
 export interface SyncResponse {
   serverState: StudentState;
-  appliedSessionIds: string[];
+  confirmedSessionIds: string[]; // client removes these from pending queue
+  appliedSessionIds: string[];   // backwards compat alias
 }
