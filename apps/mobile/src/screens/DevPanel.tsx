@@ -1,187 +1,238 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
+  View, Text, TouchableOpacity, ScrollView,
+  StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { useApp, ConflictRecord } from '../context/AppContext';
 import { CLIENT_ID } from '../storage';
 
 const SERVER = 'http://localhost:3001';
 
-export function DevPanel() {
-  const { state, isOnline, toggleOnline, sync, pendingCount, conflicts } = useApp();
-  const [syncing, setSyncing] = useState(false);
-  const [webhookCount, setWebhookCount] = useState<number | null>(null);
-  const [webhookIds, setWebhookIds] = useState<string[]>([]);
+interface WebhookEntry {
+  sessionId: string;
+  firedAt: string;
+  streak: number;
+  coins: number;
+}
 
-  // Poll webhook fired count from server every 3s
-  useEffect(() => {
-    const poll = async () => {
-      try {
-        const resp = await fetch(`${SERVER}/webhook/fired`);
-        if (resp.ok) {
-          const data = await resp.json();
-          setWebhookCount(data.count);
-          setWebhookIds(data.sessionIds);
-        }
-      } catch {
-        // server offline — ignore
+export function DevPanel() {
+  const {
+    state, isOnline, toggleOnline, sync,
+    pendingCount, conflicts,
+  } = useApp();
+
+  const [syncing, setSyncing]               = useState(false);
+  const [resetting, setResetting]           = useState(false);
+  const [webhooks, setWebhooks]             = useState<WebhookEntry[]>([]);
+  const [lastSyncTime, setLastSyncTime]     = useState<string | null>(null);
+
+  // Poll webhook log every 2s
+  const fetchWebhooks = useCallback(async () => {
+    try {
+      const resp = await fetch(`${SERVER}/webhook/fired`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setWebhooks(data.webhooks ?? []);
       }
-    };
-    poll();
-    const interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
+    } catch { /* server may be unreachable */ }
   }, []);
+
+  useEffect(() => {
+    fetchWebhooks();
+    const id = setInterval(fetchWebhooks, 2000);
+    return () => clearInterval(id);
+  }, [fetchWebhooks]);
 
   const handleSync = async () => {
     setSyncing(true);
     await sync();
+    setLastSyncTime(new Date().toLocaleTimeString());
     setSyncing(false);
   };
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
-      <Text style={styles.header}>Dev Panel</Text>
-      <Text style={styles.clientId}>Client ID: {CLIENT_ID}</Text>
+  const handleReset = async () => {
+    setResetting(true);
+    try {
+      await fetch(`${SERVER}/sync/reset`, { method: 'POST' });
+      // Clear local storage too
+      const { default: AsyncStorage } = await import(
+        '@react-native-async-storage/async-storage'
+      );
+      const keys = await AsyncStorage.getAllKeys();
+      const mine = keys.filter(k => k.startsWith(`alcovia:${CLIENT_ID}:`));
+      await AsyncStorage.multiRemove(mine);
+      Alert.alert('Reset', 'Server + local state cleared. Reload both tabs.');
+    } catch (e) {
+      Alert.alert('Error', String(e));
+    }
+    setResetting(false);
+  };
 
-      {/* ── Online toggle ────────────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Network</Text>
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 60 }}>
+      <Text style={styles.header}>Dev Panel</Text>
+      <Text style={styles.clientId}>device: {CLIENT_ID}</Text>
+
+      {/* ── Network toggle ──────────────────────────────────────────── */}
+      <Section title="Network">
         <View style={styles.row}>
           <View style={[styles.dot, { backgroundColor: isOnline ? '#22c55e' : '#ef4444' }]} />
           <Text style={styles.statusText}>{isOnline ? 'Online' : 'Offline'}</Text>
           <TouchableOpacity
-            style={[styles.btn, { backgroundColor: isOnline ? '#fee2e2' : '#dcfce7' }]}
+            style={[styles.pill, { backgroundColor: isOnline ? '#fee2e2' : '#dcfce7' }]}
             onPress={toggleOnline}
           >
-            <Text style={{ color: isOnline ? '#dc2626' : '#16a34a', fontWeight: '600' }}>
-              {isOnline ? '🔴 Go offline' : '🟢 Go online'}
+            <Text style={{ color: isOnline ? '#dc2626' : '#16a34a', fontWeight: '700' }}>
+              {isOnline ? 'Go offline' : 'Go online'}
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </Section>
 
-      {/* ── Pending queue ────────────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Pending queue</Text>
-        <View style={styles.bigNumRow}>
-          <View style={styles.bigNumBox}>
-            <Text style={[styles.bigNum, { color: pendingCount > 0 ? '#f59e0b' : '#22c55e' }]}>
-              {pendingCount}
-            </Text>
-            <Text style={styles.bigLabel}>unsynced changes</Text>
-          </View>
-        </View>
+      {/* ── Sync ────────────────────────────────────────────────────── */}
+      <Section title={`Pending: ${pendingCount} change${pendingCount !== 1 ? 's' : ''}`}>
         <TouchableOpacity
-          style={[styles.btn, styles.syncBtn, syncing && { opacity: 0.6 }]}
+          style={[styles.actionBtn, syncing && styles.actionBtnDim]}
           onPress={handleSync}
           disabled={syncing}
         >
           {syncing
             ? <ActivityIndicator color="#fff" size="small" />
-            : <Text style={styles.syncBtnText}>⟳ Force sync now</Text>
+            : <Text style={styles.actionBtnText}>⟳ Force sync</Text>
           }
         </TouchableOpacity>
-      </View>
+        {lastSyncTime && (
+          <Text style={styles.hint}>Last sync: {lastSyncTime}</Text>
+        )}
+      </Section>
 
-      {/* ── n8n Webhook ──────────────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>n8n notifications</Text>
+      {/* ── State ───────────────────────────────────────────────────── */}
+      <Section title={`State — ${CLIENT_ID}`}>
+        <Row label="Coins"      value={state?.coins ?? 0} />
+        <Row label="Streak"     value={`${state?.streak ?? 0} days`} />
+        <Row label="Sessions"   value={state?.sessions.length ?? 0} />
+        <Row label="Last focus" value={state?.lastFocusDate ?? 'never'} />
+        <Row label="Lamport ↑"  value={state?.lamportClock ?? 0} />
+      </Section>
+
+      {/* ── n8n notifications ───────────────────────────────────────── */}
+      <Section title="n8n notifications">
         <Text style={styles.hint}>
-          Same session arriving from 2 devices → should fire exactly once
+          Count must stay at 1 even when the same session syncs from both devices
         </Text>
         <View style={styles.bigNumRow}>
-          <View style={styles.bigNumBox}>
-            <Text style={[styles.bigNum, { color: '#6C63FF' }]}>
-              {webhookCount ?? '—'}
-            </Text>
-            <Text style={styles.bigLabel}>webhooks fired (total)</Text>
+          <Text style={[styles.bigNum, { color: webhooks.length > 0 ? '#6C63FF' : '#aaa' }]}>
+            {webhooks.length}
+          </Text>
+          <Text style={styles.bigLabel}>webhooks fired (total)</Text>
+        </View>
+        {webhooks.slice(-4).reverse().map(w => (
+          <View key={w.sessionId} style={styles.webhookRow}>
+            <Text style={styles.mono}>✓ {w.sessionId.slice(0, 14)}…</Text>
+            <Text style={styles.hint}>streak:{w.streak} coins:{w.coins}</Text>
+            <Text style={styles.tinyHint}>{w.firedAt}</Text>
           </View>
-        </View>
-        {webhookIds.slice(-3).map(id => (
-          <Text key={id} style={styles.mono}>✓ {id.slice(0, 16)}…</Text>
         ))}
-      </View>
+      </Section>
 
-      {/* ── Current state dump ──────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Current state ({CLIENT_ID})</Text>
-        <View style={styles.stateGrid}>
-          <StateRow label="Coins" value={state?.coins ?? 0} />
-          <StateRow label="Streak" value={`${state?.streak ?? 0} days`} />
-          <StateRow label="Sessions" value={state?.sessions.length ?? 0} />
-          <StateRow label="Last focus" value={state?.lastFocusDate ?? 'never'} />
-          <StateRow label="Lamport" value={state?.lamportClock ?? 0} />
-        </View>
-      </View>
-
-      {/* ── Conflicts log ────────────────────────────────────────────── */}
+      {/* ── Conflicts ───────────────────────────────────────────────── */}
       {conflicts.length > 0 && (
-        <View style={[styles.card, { borderColor: '#f59e0b', borderWidth: 1.5 }]}>
-          <Text style={[styles.cardTitle, { color: '#d97706' }]}>
-            ⚠ Conflicts resolved ({conflicts.length})
-          </Text>
+        <Section title={`⚠ Conflicts resolved (${conflicts.length})`} warn>
           <Text style={styles.hint}>
-            Server (higher Lamport) wins. Local value was replaced.
+            Higher Lamport clock wins. Server state is authoritative.
           </Text>
-          {conflicts.slice(-5).reverse().map((c, i) => (
+          {conflicts.slice(-4).reverse().map((c: ConflictRecord, i: number) => (
             <View key={i} style={styles.conflictRow}>
-              <Text style={styles.mono}>task: {c.taskId.slice(0, 8)}…</Text>
+              <Text style={styles.mono}>{c.taskId.slice(0, 10)}…</Text>
               <Text style={styles.conflictDetail}>
-                local: <Text style={{ color: '#ef4444' }}>{c.localStatus}</Text>
-                {' → server: '}
-                <Text style={{ color: '#22c55e' }}>{c.resolvedTo}</Text>
+                <Text style={{ color: '#dc2626' }}>{c.localStatus}</Text>
+                {' → '}
+                <Text style={{ color: '#16a34a' }}>{c.resolvedTo}</Text>
+                {' (server lamport wins)'}
               </Text>
             </View>
           ))}
-        </View>
+        </Section>
       )}
 
-      {/* ── Recent sessions ──────────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Recent sessions</Text>
+      {/* ── Task snapshot ───────────────────────────────────────────── */}
+      <Section title="Task snapshot">
+        {(state?.subjects ?? []).length === 0 && (
+          <Text style={styles.hint}>No subjects — sync to load from server</Text>
+        )}
+        {(state?.subjects ?? []).flatMap(sub =>
+          sub.chapters.flatMap(ch =>
+            ch.tasks.map(task => (
+              <View key={task.id} style={styles.taskRow}>
+                <Text style={styles.taskName} numberOfLines={1}>{task.title}</Text>
+                <Text style={[
+                  styles.taskStatus,
+                  task.status === 'done'        ? styles.green
+                  : task.status === 'in_progress' ? styles.amber
+                  : styles.muted,
+                ]}>
+                  {task.status}
+                </Text>
+                <Text style={styles.mono}>L:{task.lamport}</Text>
+              </View>
+            ))
+          )
+        )}
+      </Section>
+
+      {/* ── Recent sessions ─────────────────────────────────────────── */}
+      <Section title="Sessions (latest 5)">
         {(state?.sessions ?? []).length === 0 && (
           <Text style={styles.hint}>No sessions yet</Text>
         )}
         {(state?.sessions ?? []).slice(-5).reverse().map(s => (
           <View key={s.id} style={styles.sessionRow}>
-            <Text style={s.result === 'success' ? styles.successText : styles.failText}>
+            <Text style={s.result === 'success' ? styles.green : styles.red}>
               {s.result === 'success' ? '✓' : '✗'} {s.result}
             </Text>
-            <Text style={styles.sessionMeta}>
-              {s.targetMinutes}min · +{s.coinsEarned} coins
-              {s.streakDay ? ` · streak day ${s.streakDay}` : ''}
+            <Text style={styles.hint}>
+              {s.targetMinutes}min · +{s.coinsEarned}c
+              {s.streakDay != null ? ` · streak:${s.streakDay}` : ''}
             </Text>
-            <Text style={styles.mono}>{s.id.slice(0, 12)}…</Text>
+            <Text style={styles.mono}>{s.id.slice(0, 14)}…</Text>
           </View>
         ))}
-      </View>
+      </Section>
 
-      {/* ── Task status snapshot ─────────────────────────────────────── */}
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Task status snapshot</Text>
-        {(state?.subjects ?? []).flatMap(sub =>
-          sub.chapters.flatMap(ch =>
-            ch.tasks.map(task => (
-              <View key={task.id} style={styles.taskSnap}>
-                <Text style={styles.taskSnapTitle}>{task.title}</Text>
-                <Text style={[
-                  styles.taskSnapStatus,
-                  task.status === 'done' ? styles.successText
-                  : task.status === 'in_progress' ? styles.warnText
-                  : styles.mutedText,
-                ]}>
-                  {task.status} (L:{task.lamport})
-                </Text>
-              </View>
-            ))
-          )
-        )}
-      </View>
+      {/* ── Reset ───────────────────────────────────────────────────── */}
+      <Section title="Danger zone">
+        <Text style={styles.hint}>Clears server DB + this device's local storage</Text>
+        <TouchableOpacity
+          style={[styles.actionBtn, { backgroundColor: '#dc2626' }, resetting && styles.actionBtnDim]}
+          onPress={handleReset}
+          disabled={resetting}
+        >
+          {resetting
+            ? <ActivityIndicator color="#fff" size="small" />
+            : <Text style={styles.actionBtnText}>🗑 Reset everything</Text>
+          }
+        </TouchableOpacity>
+      </Section>
     </ScrollView>
   );
 }
 
-function StateRow({ label, value }: { label: string; value: string | number }) {
+// ── Small helpers ─────────────────────────────────────────────────────────────
+
+function Section({
+  title, children, warn,
+}: {
+  title: string; children: React.ReactNode; warn?: boolean;
+}) {
+  return (
+    <View style={[styles.card, warn && styles.warnCard]}>
+      <Text style={[styles.cardTitle, warn && styles.warnTitle]}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string | number }) {
   return (
     <View style={styles.stateRow}>
       <Text style={styles.stateLabel}>{label}</Text>
@@ -190,40 +241,41 @@ function StateRow({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f8f8', padding: 12 },
-  header: { fontSize: 20, fontWeight: '700', marginBottom: 2 },
-  clientId: { fontSize: 11, color: '#888', fontFamily: 'monospace', marginBottom: 14 },
-  card: {
-    backgroundColor: '#fff', borderRadius: 12, padding: 14,
-    marginBottom: 12, borderWidth: 1, borderColor: '#eee',
-  },
-  cardTitle: { fontSize: 13, fontWeight: '700', color: '#444', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
-  hint: { fontSize: 12, color: '#888', marginBottom: 8, fontStyle: 'italic' },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  statusText: { flex: 1, fontSize: 15, fontWeight: '600' },
-  btn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  bigNumRow: { flexDirection: 'row', justifyContent: 'center', marginVertical: 8 },
-  bigNumBox: { alignItems: 'center' },
-  bigNum: { fontSize: 40, fontWeight: '800' },
-  bigLabel: { fontSize: 12, color: '#888' },
-  syncBtn: { backgroundColor: '#6C63FF', alignItems: 'center', marginTop: 8, height: 44, justifyContent: 'center' },
-  syncBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  stateGrid: { gap: 2 },
-  stateRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
-  stateLabel: { fontSize: 13, color: '#666' },
-  stateValue: { fontSize: 13, fontWeight: '600', fontFamily: 'monospace' },
-  sessionRow: { paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f5f5f5', gap: 2 },
-  sessionMeta: { fontSize: 12, color: '#666' },
-  successText: { fontSize: 13, fontWeight: '600', color: '#16a34a' },
-  failText: { fontSize: 13, fontWeight: '600', color: '#dc2626' },
-  warnText: { fontSize: 13, color: '#d97706' },
-  mutedText: { fontSize: 13, color: '#aaa' },
-  mono: { fontSize: 11, fontFamily: 'monospace', color: '#999' },
-  conflictRow: { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#fef3c7' },
+  container:      { flex: 1, backgroundColor: '#f4f4f4', padding: 12 },
+  header:         { fontSize: 20, fontWeight: '800', marginBottom: 2 },
+  clientId:       { fontSize: 11, color: '#999', fontFamily: 'monospace', marginBottom: 14 },
+  card:           { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#eee' },
+  warnCard:       { borderColor: '#fde68a', backgroundColor: '#fffbeb' },
+  cardTitle:      { fontSize: 12, fontWeight: '700', color: '#555', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
+  warnTitle:      { color: '#b45309' },
+  row:            { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dot:            { width: 10, height: 10, borderRadius: 5 },
+  statusText:     { flex: 1, fontSize: 15, fontWeight: '600' },
+  pill:           { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
+  actionBtn:      { backgroundColor: '#6C63FF', padding: 14, borderRadius: 10, alignItems: 'center', marginTop: 4 },
+  actionBtnDim:   { opacity: 0.5 },
+  actionBtnText:  { color: '#fff', fontWeight: '700', fontSize: 14 },
+  hint:           { fontSize: 11, color: '#999', marginTop: 4, fontStyle: 'italic' },
+  tinyHint:       { fontSize: 10, color: '#bbb' },
+  bigNumRow:      { alignItems: 'center', paddingVertical: 8 },
+  bigNum:         { fontSize: 44, fontWeight: '800', lineHeight: 52 },
+  bigLabel:       { fontSize: 11, color: '#aaa' },
+  webhookRow:     { paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  conflictRow:    { paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#fde68a' },
   conflictDetail: { fontSize: 12, color: '#666', marginTop: 2 },
-  taskSnap: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
-  taskSnapTitle: { fontSize: 12, color: '#444', flex: 1 },
-  taskSnapStatus: { fontSize: 11, fontFamily: 'monospace' },
+  stateRow:       { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#f9f9f9' },
+  stateLabel:     { fontSize: 13, color: '#666' },
+  stateValue:     { fontSize: 13, fontWeight: '600', fontFamily: 'monospace' },
+  taskRow:        { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, gap: 6, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
+  taskName:       { flex: 1, fontSize: 12, color: '#333' },
+  taskStatus:     { fontSize: 11, fontFamily: 'monospace' },
+  sessionRow:     { paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: '#f5f5f5', gap: 2 },
+  mono:           { fontSize: 10, fontFamily: 'monospace', color: '#aaa' },
+  green:          { color: '#16a34a', fontWeight: '600', fontSize: 12 },
+  amber:          { color: '#d97706', fontWeight: '600', fontSize: 12 },
+  red:            { color: '#dc2626', fontWeight: '600', fontSize: 12 },
+  muted:          { color: '#bbb', fontSize: 12 },
 });

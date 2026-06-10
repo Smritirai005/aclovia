@@ -1,0 +1,143 @@
+{
+  "name": "Alcovia Focus Session Notification",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alcovia-session",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Session Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "alcovia-session"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.body.sessionId}}",
+              "value2": ""
+            }
+          ]
+        }
+      },
+      "id": "check-session-id",
+      "name": "Has sessionId?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Idempotency check using n8n's static data\n// Static data persists between executions — this is the n8n-side dedup.\n// Even if the backend fires twice (e.g. server restart before DB write),\n// n8n will catch it here.\n\nconst sessionId = $input.first().json.body.sessionId;\nconst staticData = $getWorkflowStaticData('global');\n\nif (!staticData.firedSessions) {\n  staticData.firedSessions = {};\n}\n\nif (staticData.firedSessions[sessionId]) {\n  // Already fired — return flag to stop processing\n  return [{ json: { isDuplicate: true, sessionId } }];\n}\n\n// Mark as fired\nstaticData.firedSessions[sessionId] = {\n  firedAt: new Date().toISOString(),\n  streak: $input.first().json.body.streak,\n  coins: $input.first().json.body.totalCoins,\n};\n\n// Pass through with isDuplicate = false\nreturn [{ json: { ...($input.first().json.body), isDuplicate: false } }];"
+      },
+      "id": "dedup-check",
+      "name": "Dedup by sessionId",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.isDuplicate}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "is-duplicate",
+      "name": "Is duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3001/webhook/mock-sink",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "sessionId",  "value": "={{$json.sessionId}}" },
+            { "name": "message",    "value": "={{$json.message}}" },
+            { "name": "streak",     "value": "={{$json.streak}}" },
+            { "name": "totalCoins", "value": "={{$json.totalCoins}}" },
+            { "name": "firedAt",    "value": "={{$now}}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-notification",
+      "name": "Send notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\": true, \"action\": \"notification_sent\", \"sessionId\": \"{{$json.sessionId}}\"}"
+      },
+      "id": "respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\": true, \"action\": \"duplicate_skipped\", \"sessionId\": \"{{$json.sessionId}}\"}"
+      },
+      "id": "respond-duplicate",
+      "name": "Respond duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\": false, \"error\": \"missing sessionId\"}"
+      },
+      "id": "respond-invalid",
+      "name": "Respond invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 480]
+    }
+  ],
+  "connections": {
+    "Session Webhook": {
+      "main": [[{ "node": "Has sessionId?", "type": "main", "index": 0 }]]
+    },
+    "Has sessionId?": {
+      "main": [
+        [{ "node": "Dedup by sessionId", "type": "main", "index": 0 }],
+        [{ "node": "Respond invalid",    "type": "main", "index": 0 }]
+      ]
+    },
+    "Dedup by sessionId": {
+      "main": [[{ "node": "Is duplicate?", "type": "main", "index": 0 }]]
+    },
+    "Is duplicate?": {
+      "main": [
+        [{ "node": "Respond duplicate",  "type": "main", "index": 0 }],
+        [{ "node": "Send notification",  "type": "main", "index": 0 }]
+      ]
+    },
+    "Send notification": {
+      "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
